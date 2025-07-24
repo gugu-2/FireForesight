@@ -1,0 +1,100 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FireForesight Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <style>
+        #map { height: 600px; width: 100%; }
+        .container { padding: 20px; }
+        .info-panel { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FireForesight: Wildfire Risk Dashboard</h1>
+        <div id="map"></div>
+        <div class="info-panel">
+            <h3>Risk Details</h3>
+            <p id="risk-info">Click on the map to see risk details.</p>
+        </div>
+    </div>
+    <script>
+        function initMap() {
+            const map = L.map('map').setView([36.7783, -119.4179], 6);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            L.tileLayer.wms("https://firms.modaps.eosdis.nasa.gov/wms", {
+                layers: 'fires_modis_near_real_time',
+                format: 'image/png',
+                transparent: true,
+                attribution: "NASA FIRMS"
+            }).addTo(map);
+            return map;
+        }
+
+        function loadHeatmap(map) {
+            fetch('/api/predict')
+                .then(response => {
+                    if (!response.ok) throw new Error('API request failed');
+                    return response.json();
+                })
+                .then(data => {
+                    L.heatLayer(data.map(d => [d.lat, d.lon, d.risk_prob]), {
+                        radius: 25,
+                        blur: 15,
+                        maxZoom: 10,
+                        gradient: { 0.2: 'green', 0.5: 'yellow', 0.8: 'red' }
+                    }).addTo(map);
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
+
+        const map = initMap();
+        loadHeatmap(map);
+    </script>
+</body>
+</html>
